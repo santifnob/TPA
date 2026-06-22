@@ -86,8 +86,9 @@ void callback_mqtt(char* topic, byte* payload, unsigned int length) {
         comandoPendiente += "MODO:1\n";
       } else {
         comandoPendiente += "MODO:0\n";
-        comandoPendiente += "MAN:" + String(doc["pwmManual"].as<double>()) + "\n";
       }
+    } else if(String(method) == "setPwmManual"){
+      comandoPendiente += "MAN:" + String(params) + "\n";
     }
 
     // 4. ACUSE DE RECIBO A THINGSBOARD (Evita el timeout)
