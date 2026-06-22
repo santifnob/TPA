@@ -1,12 +1,15 @@
+#include <SoftwareSerial.h>
 // --- PINES FÍSICOS ---
 const int pinLDR = A0;
 const int pinLED = 3;
-
+const int RX = 8;
+const int TX = 9;
+SoftwareSerial serialNode(RX, TX);
 // --- VARIABLES DE TIEMPO ---
 unsigned long tiempoAnterior = 0;
 const unsigned long Ts_ms = 2;
 const double Ts_sec = Ts_ms / 1000.0;
-double Ti = 0.002*2.605;
+
 unsigned long tiempoAnteriorTelemetria = 0;
 const unsigned long T_telemetria = 100;
 
@@ -14,12 +17,14 @@ const unsigned long T_telemetria = 100;
 double r = 300.0;
 double y = 0.0;
 double e = 0.0;
+double e_prev = 0.0;
 double u = 0.0;
 int pwmOut = 0;
 
 // --- CONSTANTES DEL CONTROLADOR PI ---
 double Kp = 0.89;
 double Ki = 59.33;
+double Kd = 0.00;
 double I_k = 0.0;
 
 // --- VARIABLES DE OPERACIÓN ---
@@ -31,7 +36,8 @@ void setup() {
   pinMode(pinLED, OUTPUT);
   pinMode(pinLDR, INPUT);
 
-  Serial.begin(115200);
+  Serial.begin(9600);
+  serialNode.begin(9600);
   bufferPC.reserve(32);
 
   // Si usás Serial Plotter, conviene NO imprimir mucho texto al inicio.
@@ -41,11 +47,13 @@ void setup() {
 
 void loop() {
   // 1. RECEPCIÓN DE COMANDOS
-  while (Serial.available() > 0) {
-    char c = Serial.read();
-
+  while (serialNode.available() > 0) {
+    char c = serialNode.read();
+    
     if (c == '\n' || c == '\r') {
+      Serial.println("Primer iF");
       if (bufferPC.length() > 0) {
+        Serial.println("PSegundo iF");
         procesarComando(bufferPC);
         bufferPC = "";
       }
@@ -62,11 +70,13 @@ void loop() {
 
     y = analogRead(pinLDR);
     e = r - y;
+    double de = (e - e_prev) / Ts_sec;
 
     if (modoAuto) {
       // Cálculo preliminar de control
-      u = (Kp * e) + (Ki * I_k);
+      u = (Kp * e) + (Ki * I_k) + (Kd * de);
 
+      
       // Saturación física del PWM
       pwmOut = constrain((int)u, 0, 255);
 
@@ -79,9 +89,12 @@ void loop() {
       }
 
       // Recalcular u luego de actualizar la integral
-      u = (Kp * e) + (Ki * I_k);
-      pwmOut = constrain((int)u, 0, 255);
+      u = (Kp * e) + (Ki * I_k)+ (Kd * de) ;
+      
 
+      u = constrain(u, 0, 255);
+
+      pwmOut = (int)u;
       analogWrite(pinLED, pwmOut);
 
     } else {
@@ -92,12 +105,12 @@ void loop() {
       u = pwmOut;
 
       // Bumpless transfer correcto:
-      // u = Kp*e + Ki*I_k
-      // I_k = (u - Kp*e) / Ki
+      
       if (Ki != 0) {
-        I_k = ((double)pwmOut - Kp * e) / Ki;
+        I_k = ((double)pwmOut - (Kp * e) - (Kd * de)) / Ki;
       }
     }
+    e_prev = e;
   }
 
   
@@ -105,23 +118,16 @@ void loop() {
   if (tiempoActual - tiempoAnteriorTelemetria >= T_telemetria) {
     tiempoAnteriorTelemetria += T_telemetria;
 
-    if (Ki != 0) {
-      Ti = Kp / Ki;
-    } else {
-      Ti = 0;
-    }
-
-    Serial.print(y);
-    Serial.print(",");
-    Serial.print(r);
-    Serial.print(",");
-    Serial.print(e);
-    Serial.print(",");
-    Serial.print(pwmOut);
-    Serial.print(",");
-    Serial.print(u);
-    Serial.print(",");
-    Serial.println(Ti);
+    serialNode.print(y); serialNode.print(",");
+    serialNode.print(r); serialNode.print(",");
+    serialNode.print(e); serialNode.print(",");
+    serialNode.println(u);
+    
+    // B. Imprimimos en el Monitor Serie de la PC para que vean que todo anda
+    Serial.print("PID -> y:"); Serial.print(y);
+    Serial.print(" r:"); Serial.print(r);
+    Serial.print(" e:"); Serial.print(e);
+    Serial.print(" u:"); Serial.println(u);
   }
 
 }
@@ -129,6 +135,7 @@ void loop() {
 // --- PROCESAMIENTO DE COMANDOS ---
 void procesarComando(String comando) {
   comando.trim();
+  Serial.println("Comando desde NodeMCU: " + comando); // Lo vemos en la PC
 
   int indiceDosPuntos = comando.indexOf(':');
   if (indiceDosPuntos == -1) return;
@@ -150,5 +157,8 @@ void procesarComando(String comando) {
   } 
   else if (clave.equalsIgnoreCase("MAN")) {
     pwmManual = valor;
+  }
+  else if (clave.equalsIgnoreCase("KD")) {
+    Kd = valor;
   }
 }
