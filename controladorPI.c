@@ -157,6 +157,7 @@ void procesarComando(String comando) {
   } 
   else if (clave.equalsIgnoreCase("MAN")) {
     pwmManual = valor;
+    Serial.println(pwmManual);
   }
   else if (clave.equalsIgnoreCase("KD")) {
     Kd = valor;
