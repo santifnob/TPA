@@ -3,7 +3,6 @@
 #include <ArduinoJson.h>
 #include <SoftwareSerial.h> 
 
-// --- CONFIGURACIÓN DE RED Y BROKER ---
 const char* ssid = "Deptosanti";
 const char* password = "46447073";
 const char* mqtt_server = "mqtt.thingsboard.cloud"; 
@@ -14,15 +13,14 @@ const char* topic_telemetry = "utn/2026/c02/g01/telemetry";
 const char* topic_cmd = "utn/2026/c02/g01/cmd";
 
 // --- COMUNICACIÓN CON EL ARDUINO UNO ---
-const int RX_UNO = 14; // D5 - Conectar al TX_UNO (Pin 9) mediante divisor
-const int TX_UNO = 12; // D6 - Conectar al RX_UNO (Pin 8) de forma directa
+const int RX_UNO = 14; 
+const int TX_UNO = 12; 
 SoftwareSerial serialUno(RX_UNO, TX_UNO);
 
-// --- OBJETOS Y VARIABLES GLOBALES --- (Sin duplicados)
 WiFiClient espClient;
 PubSubClient client(espClient);
 String bufferSerie = "";
-String comandoPendiente = ""; // "Libreta" para la ventana de silencio
+String comandoPendiente = ""; 
 
 void setup() {
   Serial.begin(9600);       
@@ -51,7 +49,6 @@ void setup_wifi() {
   Serial.println("\nWiFi conectado!");
 }
 
-// --- CALLBACK: RECEPCIÓN DE COMANDOS DESDE LA NUBE (RPC) ---
 void callback_mqtt(char* topic, byte* payload, unsigned int length) {
   String message = "";
   for (unsigned int i = 0; i < length; i++) { message += (char)payload[i]; }
@@ -59,12 +56,10 @@ void callback_mqtt(char* topic, byte* payload, unsigned int length) {
   Serial.print("MQTT IN: ");
   Serial.println(message);
 
-  // 1. Extraemos el Request ID del topic para poder responder
   String topicStr = String(topic);
   int lastSlash = topicStr.lastIndexOf('/');
   String requestId = topicStr.substring(lastSlash + 1);
 
-  // 2. Parseo del JSON 
   StaticJsonDocument<200> doc;
   DeserializationError error = deserializeJson(doc, message);
   
@@ -72,7 +67,6 @@ void callback_mqtt(char* topic, byte* payload, unsigned int length) {
     const char* method = doc["method"];
     double params = doc["params"];
 
-    // 3. Guardamos el comando en la "Libreta" en lugar de enviarlo a ciegas
     if (String(method) == "setSetpoint") {
       comandoPendiente += "SP:" + String(params) + "\n";
     } else if (String(method) == "setKp") {
@@ -86,12 +80,10 @@ void callback_mqtt(char* topic, byte* payload, unsigned int length) {
         comandoPendiente += "MODO:1\n";
       } else {
         comandoPendiente += "MODO:0\n";
+        comandoPendiente += "MAN:" + String(doc["pwmManual"].as<double>()) + "\n";
       }
-    } else if(String(method) == "setPwmManual"){
-      comandoPendiente += "MAN:" + String(params) + "\n";
     }
 
-    // 4. ACUSE DE RECIBO A THINGSBOARD (Evita el timeout)
     String responseTopic = "v1/devices/me/rpc/response/" + requestId;
     client.publish(responseTopic.c_str(), "{\"status\":\"ok\"}");
     
@@ -121,26 +113,22 @@ void loop() {
   if (!client.connected()) { reconnect(); }
   client.loop();
 
-  // --- LECTURA DE TELEMETRÍA Y VENTANA DE SILENCIO ---
   while (serialUno.available() > 0) {
     char c = serialUno.read();
     
     if (c == '\n' || c == '\r') {
       if (bufferSerie.length() > 0) {
         
-        // 1. Procesamos los datos que llegaron
         procesarYPublicar(bufferSerie);
         bufferSerie = "";
 
-        // 2. ¡Ventana Segura! Apenas el Arduino termina de hablar, inyectamos los comandos
         if (comandoPendiente != "") {
           serialUno.print(comandoPendiente);
-          comandoPendiente = ""; // Vaciamos la libreta
+          comandoPendiente = ""; 
         }
       }
     } else {
       bufferSerie += c;
-      // Seguro contra mensajes pegados
       if (bufferSerie.length() > 40) {
         bufferSerie = "";
       }
@@ -148,7 +136,6 @@ void loop() {
   }
 }
 
-// --- PARSEO CSV Y PUBLICACIÓN MQTT ---
 void procesarYPublicar(String data) {
   data.trim();
 
@@ -162,7 +149,6 @@ void procesarYPublicar(String data) {
     String e_err = data.substring(segundaComa + 1, terceraComa);
     String u_pwm = data.substring(terceraComa + 1);
 
-    // Filtro contra valores matemáticamente imposibles (picos falsos)
     if (y_ldr.toFloat() > 1024 || r_set.toFloat() > 1024) return;
 
     StaticJsonDocument<200> doc;
